@@ -34,6 +34,7 @@ import type {
   SplitNode,
   SplitResult,
   SplitTemplate,
+  TimerStatus,
   ViewMode
 } from "./types";
 
@@ -154,24 +155,183 @@ function createDefaultData(): AppData {
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringOr(value: unknown, fallback: string) {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function numberOr(value: unknown, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function booleanOr(value: unknown, fallback: boolean) {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function dateStringOr(value: unknown, fallback: string) {
+  return typeof value === "string" && !Number.isNaN(Date.parse(value)) ? value : fallback;
+}
+
+function normalizeStoredHotkeys(value: unknown): HotkeySettings {
+  const input = isRecord(value) ? value : {};
+  const candidate: HotkeySettings = { ...DEFAULT_HOTKEYS };
+
+  HOTKEY_FIELDS.forEach((field) => {
+    const raw = input[field];
+    if (typeof raw !== "string") return;
+    const normalized = normalizeHotkey(raw);
+    if (normalized) candidate[field] = normalized.display;
+  });
+
+  const validation = validateHotkeySettings(candidate);
+  return validation.ok ? validation.hotkeys : DEFAULT_HOTKEYS;
+}
+
+function normalizeNodes(value: unknown, fallbackNodes: SplitNode[]): SplitNode[] {
+  const source = Array.isArray(value) && value.length ? value : fallbackNodes;
+  const usedIds = new Set<string>();
+  const nodes = source
+    .slice(0, MAX_TEMPLATE_NODES)
+    .map((node, index) => {
+      const record = isRecord(node) ? node : {};
+      const rawName = typeof record.name === "string" ? record.name.trim() : "";
+      const fallbackName = fallbackNodes[index]?.name ?? `节点 ${index + 1}`;
+      const name = rawName || fallbackName;
+      const rawId = stringOr(record.id, fallbackNodes[index]?.id ?? `node-${index + 1}`);
+      const id = usedIds.has(rawId) ? `${rawId}-${index + 1}` : rawId;
+      usedIds.add(id);
+      return { id, name };
+    })
+    .filter((node) => node.name);
+
+  return nodes.length ? nodes : fallbackNodes.map((node) => ({ ...node })).slice(0, MAX_TEMPLATE_NODES);
+}
+
+function normalizeTemplate(value: unknown, fallback: SplitTemplate, index: number): SplitTemplate | null {
+  const record = isRecord(value) ? value : {};
+  const nodes = normalizeNodes(record.nodes, fallback.nodes);
+  if (!nodes.length) return null;
+
+  const now = new Date().toISOString();
+  const version = Math.max(1, Math.floor(numberOr(record.version, fallback.version)));
+  return {
+    id: stringOr(record.id, index === 0 ? fallback.id : makeId("template")),
+    name: stringOr(record.name, fallback.name),
+    version,
+    templateKey: makeTemplateKey(nodes),
+    nodes,
+    createdAt: dateStringOr(record.createdAt, fallback.createdAt || now),
+    updatedAt: dateStringOr(record.updatedAt, fallback.updatedAt || now)
+  };
+}
+
+function normalizeSplit(value: unknown, fallbackIndex: number): SplitResult | null {
+  if (!isRecord(value)) return null;
+  const durationMs = Math.max(0, Math.floor(numberOr(value.durationMs, Number.NaN)));
+  if (!Number.isFinite(durationMs)) return null;
+  const index = Math.max(0, Math.floor(numberOr(value.index, fallbackIndex)));
+  const completedAtFallback = new Date().toISOString();
+
+  return {
+    nodeId: stringOr(value.nodeId, `node-${index + 1}`),
+    name: stringOr(value.name, `节点 ${index + 1}`),
+    index,
+    durationMs,
+    completedAt: dateStringOr(value.completedAt, completedAtFallback)
+  };
+}
+
+function normalizeRunRecord(value: unknown): RunRecord | null {
+  if (!isRecord(value)) return null;
+  const rawSplits = Array.isArray(value.splits) ? value.splits : [];
+  const splits = rawSplits.map((split, index) => normalizeSplit(split, index)).filter((split): split is SplitResult => Boolean(split));
+  if (!splits.length) return null;
+
+  const templateKey = stringOr(value.templateKey, "");
+  if (!templateKey) return null;
+
+  const now = new Date().toISOString();
+  return {
+    id: stringOr(value.id, makeId("run")),
+    templateId: stringOr(value.templateId, DEFAULT_TEMPLATE_ID),
+    templateName: stringOr(value.templateName, "未知模板"),
+    templateVersion: Math.max(1, Math.floor(numberOr(value.templateVersion, 1))),
+    templateKey,
+    startedAt: dateStringOr(value.startedAt, now),
+    finishedAt: dateStringOr(value.finishedAt, now),
+    completed: booleanOr(value.completed, false),
+    totalMs: sumSplits(splits),
+    splits,
+    note: typeof value.note === "string" ? value.note : undefined
+  };
+}
+
+function normalizeActiveRun(value: unknown): ActiveRun | null {
+  if (!isRecord(value)) return null;
+  const fallbackTemplate = createDefaultTemplate();
+  const nodes = normalizeNodes(value.nodes, fallbackTemplate.nodes);
+  if (!nodes.length) return null;
+
+  const statusValues: TimerStatus[] = ["未开始", "计时中", "已暂停", "已完成"];
+  const status = typeof value.status === "string" && statusValues.includes(value.status as TimerStatus) ? (value.status as TimerStatus) : "已暂停";
+  const splits = (Array.isArray(value.splits) ? value.splits : [])
+    .slice(0, nodes.length)
+    .map((split, index) => normalizeSplit(split, index))
+    .filter((split): split is SplitResult => Boolean(split));
+  const rawCurrentIndex = Math.floor(numberOr(value.currentIndex, splits.length));
+  const currentIndex = status === "已完成" ? nodes.length : clamp(rawCurrentIndex, splits.length, nodes.length);
+  const now = new Date().toISOString();
+  const startedAt = dateStringOr(value.startedAt, now);
+  const currentSegmentStartedAt =
+    status === "计时中" ? Math.max(0, Math.floor(numberOr(value.currentSegmentStartedAt, Date.now()))) : null;
+
+  return {
+    id: stringOr(value.id, makeId("run")),
+    templateId: stringOr(value.templateId, DEFAULT_TEMPLATE_ID),
+    templateName: stringOr(value.templateName, "未知模板"),
+    templateVersion: Math.max(1, Math.floor(numberOr(value.templateVersion, 1))),
+    templateKey: stringOr(value.templateKey, makeTemplateKey(nodes)),
+    nodes,
+    status,
+    startedAt,
+    currentIndex,
+    currentSegmentStartedAt,
+    currentSegmentElapsedBeforePauseMs: Math.max(0, Math.floor(numberOr(value.currentSegmentElapsedBeforePauseMs, 0))),
+    splits,
+    savedAt: dateStringOr(value.savedAt, now)
+  };
+}
+
 function normalizeData(input?: Partial<AppData>, options: { pauseRunning?: boolean; resetClickThrough?: boolean } = {}): AppData {
   const pauseRunning = options.pauseRunning ?? true;
   const resetClickThrough = options.resetClickThrough ?? true;
   const fallback = createDefaultData();
-  const templates = input?.templates?.length ? input.templates : fallback.templates;
-  const storedOpacity = input?.settings?.opacity;
+  const rawTemplates = Array.isArray(input?.templates) ? input.templates : [];
+  const templateIds = new Set<string>();
+  const normalizedTemplates = rawTemplates
+    .map((template, index) => normalizeTemplate(template, fallback.templates[0], index))
+    .filter((template): template is SplitTemplate => Boolean(template))
+    .map((template, index) => {
+      const id = templateIds.has(template.id) ? `${template.id}-${index + 1}` : template.id;
+      templateIds.add(id);
+      return { ...template, id };
+    });
+  const templates = normalizedTemplates.length ? normalizedTemplates : fallback.templates;
+  const rawSettings: Record<string, unknown> = isRecord(input?.settings) ? input.settings : {};
+  const storedOpacity = numberOr(rawSettings.opacity, fallback.settings.opacity);
   const migratedOpacity = input?.version && input.version < 4 && (storedOpacity === 0 || storedOpacity === 0.38) ? fallback.settings.opacity : storedOpacity;
-  const hotkeys = {
-    ...DEFAULT_HOTKEYS,
-    ...(input?.settings?.hotkeys ?? {}),
-    toggleClickThrough: ""
-  };
   const currentTemplateId =
-    input?.settings?.currentTemplateId && templates.some((template) => template.id === input.settings?.currentTemplateId)
-      ? input.settings.currentTemplateId
+    typeof rawSettings.currentTemplateId === "string" && templates.some((template) => template.id === rawSettings.currentTemplateId)
+      ? rawSettings.currentTemplateId
       : templates[0].id;
 
-  let activeRun = input?.activeRun ?? null;
+  let activeRun = normalizeActiveRun(input?.activeRun);
+  if (activeRun && !templates.some((template) => template.templateKey === activeRun?.templateKey)) {
+    activeRun = null;
+  }
   if (pauseRunning && activeRun?.status === "计时中") {
     activeRun = {
       ...activeRun,
@@ -184,14 +344,14 @@ function normalizeData(input?: Partial<AppData>, options: { pauseRunning?: boole
   return {
     version: 4,
     settings: {
-      scale: fallback.settings.scale,
-      opacity: migratedOpacity ?? fallback.settings.opacity,
-      clickThrough: resetClickThrough ? false : input?.settings?.clickThrough ?? fallback.settings.clickThrough,
+      scale: clamp(numberOr(rawSettings.scale, fallback.settings.scale), 0.8, 1.5),
+      opacity: clamp(migratedOpacity, 0, 1),
+      clickThrough: resetClickThrough ? false : booleanOr(rawSettings.clickThrough, fallback.settings.clickThrough),
       currentTemplateId,
-      hotkeys
+      hotkeys: normalizeStoredHotkeys(rawSettings.hotkeys)
     },
     templates,
-    runs: input?.runs ?? [],
+    runs: (Array.isArray(input?.runs) ? input.runs : []).map(normalizeRunRecord).filter((run): run is RunRecord => Boolean(run)),
     activeRun
   };
 }
