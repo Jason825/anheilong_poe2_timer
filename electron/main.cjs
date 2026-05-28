@@ -18,6 +18,10 @@ const HOTKEY_ACTIONS = {
   toggleView: "切换展开"
 };
 const HOTKEY_FIELDS = Object.keys(HOTKEY_ACTIONS);
+const MAIN_WINDOW_DEFAULT_WIDTH = 368;
+const MAIN_WINDOW_DEFAULT_HEIGHT = 164;
+const MAIN_WINDOW_MIN_WIDTH = 300;
+const MAIN_WINDOW_MIN_HEIGHT = 112;
 
 let mainWindow = null;
 let settingsWindow = null;
@@ -66,12 +70,51 @@ function normalizeHotkeys(hotkeys) {
 }
 
 function normalizeAccelerator(accelerator) {
-  return String(accelerator || "")
+  const parts = String(accelerator || "")
     .trim()
     .split("+")
     .map((part) => part.trim())
-    .filter(Boolean)
-    .join("+");
+    .filter(Boolean);
+  if (!parts.length) return "";
+
+  const modifiers = new Set();
+  const keys = [];
+  const keyNames = {
+    arrowup: "Up",
+    arrowdown: "Down",
+    arrowleft: "Left",
+    arrowright: "Right",
+    esc: "Escape",
+    escape: "Escape",
+    pageup: "PageUp",
+    pagedown: "PageDown",
+    space: "Space",
+    return: "Enter",
+    enter: "Enter",
+    delete: "Delete",
+    backspace: "Backspace",
+    home: "Home",
+    end: "End",
+    insert: "Insert",
+    tab: "Tab"
+  };
+
+  for (const part of parts) {
+    const lower = part.toLocaleLowerCase();
+    if (["commandorcontrol", "control", "ctrl", "cmd", "command", "meta"].includes(lower)) {
+      modifiers.add("CommandOrControl");
+    } else if (["alt", "option"].includes(lower)) {
+      modifiers.add("Alt");
+    } else if (lower === "shift") {
+      modifiers.add("Shift");
+    } else {
+      const upper = part.toUpperCase();
+      keys.push(/^F([1-9]|1\d|2[0-4])$/.test(upper) ? upper : keyNames[lower] ?? (part.length === 1 ? upper : part));
+    }
+  }
+
+  if (keys.length !== 1) return "";
+  return [...["CommandOrControl", "Alt", "Shift"].filter((modifier) => modifiers.has(modifier)), keys[0]].join("+");
 }
 
 function canonicalAccelerator(accelerator) {
@@ -84,7 +127,7 @@ function getShortcutEntries(hotkeys) {
     key,
     action: HOTKEY_ACTIONS[key],
     accelerator: normalizeAccelerator(normalized[key])
-  })).filter((entry) => entry.accelerator);
+  }));
 }
 
 function findDuplicateAccelerators(entries) {
@@ -96,6 +139,10 @@ function findDuplicateAccelerators(entries) {
     else used.set(canonical, entry);
   });
   return [...new Set(duplicates)];
+}
+
+function findInvalidAccelerators(entries) {
+  return entries.filter((entry) => !entry.accelerator).map((entry) => entry.action);
 }
 
 function getDataPath() {
@@ -298,10 +345,10 @@ function loadRenderer(window, kind) {
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 392,
-    height: 156,
-    minWidth: 300,
-    minHeight: 112,
+    width: MAIN_WINDOW_DEFAULT_WIDTH,
+    height: MAIN_WINDOW_DEFAULT_HEIGHT,
+    minWidth: MAIN_WINDOW_MIN_WIDTH,
+    minHeight: MAIN_WINDOW_MIN_HEIGHT,
     show: false,
     frame: false,
     transparent: true,
@@ -355,7 +402,10 @@ function openSettingsWindow() {
     return { ok: true };
   }
 
-  const mainBounds = mainWindow && !mainWindow.isDestroyed() ? mainWindow.getBounds() : { x: 120, y: 120, width: 392, height: 156 };
+  const mainBounds =
+    mainWindow && !mainWindow.isDestroyed()
+      ? mainWindow.getBounds()
+      : { x: 120, y: 120, width: MAIN_WINDOW_DEFAULT_WIDTH, height: MAIN_WINDOW_DEFAULT_HEIGHT };
   settingsWindow = new BrowserWindow({
     width: 500,
     height: 560,
@@ -400,6 +450,8 @@ function closeSettingsWindow() {
 function registerShortcuts(hotkeys = DEFAULT_HOTKEYS) {
   const normalized = normalizeHotkeys(hotkeys);
   const entries = getShortcutEntries(normalized);
+  const invalid = findInvalidAccelerators(entries);
+  if (invalid.length) return { ok: false, failures: invalid };
   const duplicates = findDuplicateAccelerators(entries);
   if (duplicates.length) return { ok: false, failures: duplicates };
 
@@ -464,8 +516,11 @@ app.whenReady().then(async () => {
   ipcMain.handle("设置:关闭", closeSettingsWindow);
   ipcMain.handle("窗口:调整尺寸", (_event, size) => {
     if (!mainWindow || mainWindow.isDestroyed()) return { ok: false };
-    const width = Math.max(150, Math.round(size.width));
-    const height = Math.max(60, Math.round(size.height));
+    const requestedWidth = Number(size && size.width);
+    const requestedHeight = Number(size && size.height);
+    if (!Number.isFinite(requestedWidth) || !Number.isFinite(requestedHeight)) return { ok: false };
+    const width = Math.max(150, Math.round(requestedWidth));
+    const height = Math.max(60, Math.round(requestedHeight));
     mainWindow.setContentSize(width, height);
     positionLockWindow();
     return { ok: true };
@@ -473,7 +528,8 @@ app.whenReady().then(async () => {
   createWindow();
   createLockWindow();
   createTray();
-  registerShortcuts(initialData.settings && initialData.settings.hotkeys);
+  const shortcutResult = registerShortcuts(initialData.settings && initialData.settings.hotkeys);
+  if (!shortcutResult.ok) registerShortcuts(DEFAULT_HOTKEYS);
 });
 
 app.on("window-all-closed", () => {});
