@@ -62,6 +62,7 @@
 - 安装版前端资源必须使用相对路径加载；Vite `base` 保持 `./`，Logo 等 `public` 资源通过 `import.meta.env.BASE_URL` 引用。
 - Electron 主窗口和设置窗口增加显示兜底，避免渲染页加载完成但 `ready-to-show` 未触发时面板一直隐藏。
 - Windows 打包暂时禁用 asar，避免打包阶段写入 asar integrity 和图标资源时被系统文件锁打断。
+- NSIS 安装完成后关闭自动启动，减少 360 等安全软件在安装过程中拦截 Electron DLL 写入的误报；根治误报需要正式代码签名证书。
 
 ## 后续计划
 
