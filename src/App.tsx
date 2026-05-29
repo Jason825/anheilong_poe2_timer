@@ -444,11 +444,15 @@ function updateDurationPart(value: string, partIndex: number, rawValue: string) 
   return nextParts.join(":");
 }
 
-function getConfirmActionMessage(action: ConfirmAction) {
+function getConfirmActionMessage(action: ConfirmAction, details: { relatedHistoryCount?: number } = {}) {
   if (action === "重置当前关卡") return "当前关卡时间会清零，已完成关卡不会改变。";
   if (action === "重置所有关卡") return "本次计时会全部清空，历史记录不会删除。";
   if (action === "删除历史记录") return "这条历史记录会被删除，历史最佳记录会自动重新计算。";
-  if (action === "删除关卡模板") return "当前关卡模板会被删除，历史记录不会删除。";
+  if (action === "删除关卡模板") {
+    const count = details.relatedHistoryCount ?? 0;
+    const historyText = count > 0 ? `并同时删除该模板下 ${count} 条历史记录` : "该模板下的历史记录也会一并删除";
+    return `当前关卡模板会被删除，${historyText}，此操作不可恢复。`;
+  }
   return "关卡模板会恢复为默认剧情，自定义模板和历史记录不会删除。";
 }
 
@@ -842,6 +846,11 @@ export default function App() {
     return settingsHistoryItems.find((item) => item.id === selectedSettingsHistoryId) ?? settingsHistoryItems[0] ?? null;
   }, [selectedSettingsHistoryId, settingsHistoryItems]);
 
+  const templateDeleteHistoryCount = useMemo(() => {
+    if (!templateDeleteTargetId) return 0;
+    return data.runs.filter((run) => run.templateId === templateDeleteTargetId).length;
+  }, [data.runs, templateDeleteTargetId]);
+
   useEffect(() => {
     window.poe2Timer.loadData().then((storedData) => {
       const normalized = normalizeData(storedData, {
@@ -1197,6 +1206,7 @@ export default function App() {
       return {
         ...previous,
         templates,
+        runs: previous.runs.filter((run) => run.templateId !== templateId),
         settings: {
           ...previous.settings,
           currentTemplateId
@@ -1205,7 +1215,10 @@ export default function App() {
       };
     });
     setTemplateDeleteTargetId(null);
-    setTemplateMessage("关卡模板已删除。");
+    setSelectedHistoryId("best-history");
+    setSelectedSettingsHistoryId("best-history");
+    setSettingsHistoryDropdownOpen(false);
+    setTemplateMessage("关卡模板及其历史记录已删除。");
   }, []);
 
   const deleteHistoryRecord = useCallback((recordId: string) => {
@@ -1470,7 +1483,7 @@ export default function App() {
     <section className="confirm-layer no-drag">
       <div className="confirm-dialog">
         <strong>{confirmAction}</strong>
-        <span>{getConfirmActionMessage(confirmAction)}</span>
+        <span>{getConfirmActionMessage(confirmAction, { relatedHistoryCount: templateDeleteHistoryCount })}</span>
         <div className="confirm-actions">
           <button className="confirm-button ghost" onClick={cancelConfirmAction} type="button">
             取消

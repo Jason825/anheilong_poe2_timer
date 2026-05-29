@@ -22,6 +22,7 @@ const MAIN_WINDOW_DEFAULT_WIDTH = 368;
 const MAIN_WINDOW_DEFAULT_HEIGHT = 164;
 const MAIN_WINDOW_MIN_WIDTH = 300;
 const MAIN_WINDOW_MIN_HEIGHT = 112;
+const APP_USER_MODEL_ID = "com.anheilong.poe2timer";
 
 let mainWindow = null;
 let settingsWindow = null;
@@ -172,6 +173,17 @@ function sendShortcut(action) {
   mainWindow.webContents.send("快捷键", action);
 }
 
+function getRuntimeIconPath() {
+  if (app.isPackaged) return path.join(process.resourcesPath, "icon.ico");
+  return path.join(__dirname, "..", "build", "icon.ico");
+}
+
+function getAppIcon() {
+  const icon = nativeImage.createFromPath(getRuntimeIconPath());
+  if (!icon.isEmpty()) return icon;
+  return nativeImage.createFromPath(path.join(__dirname, "..", "public", "brand", "dark-dragon-logo.png"));
+}
+
 function positionLockWindow() {
   if (!mainWindow || mainWindow.isDestroyed() || !lockWindow || lockWindow.isDestroyed()) return;
   const bounds = mainWindow.getBounds();
@@ -210,13 +222,7 @@ function setClickThrough(enabled) {
 }
 
 function createTrayIcon() {
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
-      <rect width="32" height="32" rx="7" fill="#0a0e12"/>
-      <path d="M9 8h14v4H13v4h8v4h-8v4H9V8Z" fill="#d6b46a"/>
-      <circle cx="24" cy="24" r="3" fill="#69e6ff"/>
-    </svg>`;
-  return nativeImage.createFromDataURL(`data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`);
+  return getAppIcon().resize({ width: 16, height: 16 });
 }
 
 function rebuildTrayMenu() {
@@ -358,6 +364,7 @@ function createWindow() {
     movable: true,
     skipTaskbar: false,
     alwaysOnTop: true,
+    icon: getRuntimeIconPath(),
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -422,6 +429,7 @@ function openSettingsWindow() {
     movable: true,
     skipTaskbar: false,
     alwaysOnTop: true,
+    icon: getRuntimeIconPath(),
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -489,6 +497,7 @@ function registerShortcuts(hotkeys = DEFAULT_HOTKEYS) {
 }
 
 app.whenReady().then(async () => {
+  if (process.platform === "win32") app.setAppUserModelId(APP_USER_MODEL_ID);
   const initialData = await loadData();
   ipcMain.handle("数据:读取", loadData);
   ipcMain.handle("数据:保存", (_event, data) => saveData(data));
