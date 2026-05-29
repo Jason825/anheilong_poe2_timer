@@ -32,6 +32,7 @@
     "appId": "com.anheilong.poe2timer",
     "productName": "暗黑龙剧情计时器",
     "executableName": "anheilong-poe2-timer",
+    "asar": false,
     "directories": {
       "buildResources": "build",
       "output": "release"
@@ -52,6 +53,7 @@
       "target": "nsis"
     },
     "nsis": {
+      "include": "build/installer.nsh",
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,

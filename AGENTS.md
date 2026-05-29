@@ -18,6 +18,7 @@
 npm install
 npm run dev
 npm run build
+npm run dist:win
 ```
 
 ## 关键目录
@@ -32,6 +33,9 @@ npm run build
 - UI 保持透明、小巧、低遮挡，优先服务游戏实战。
 - 应用启动后默认可点击/可拖动且背景不透明度 100% 可见。
 - 托盘、窗口、任务栏和未来安装包/桌面快捷方式图标统一使用 `build/icon.ico`，图标源自 `public/brand/dark-dragon-logo.png`。
+- Windows 安装目录名固定为 `anheilong_timer_${VERSION}`，例如 `anheilong_timer_0.1.0`；更换安装地址时仍应追加该子目录，避免直接散装到用户选择的父目录。
+- 安装版通过 `file://` 加载 `dist/index.html`，`vite.config.ts` 的 `base` 必须保持 `./`；渲染层引用 `public` 静态资源时使用 `import.meta.env.BASE_URL` 拼接，避免安装版资源路径失效。
+- 当前 Windows 打包暂时禁用 asar，以避开 Electron 可执行文件资源二次写入时的 Windows 文件锁问题；后续如恢复 asar，必须先验证 `npm run dist:win` 稳定通过。
 - 右上角控制按钮使用图标：迷你/列表/列表2、锁定、透明度、设置、最小化、关闭，不使用文字按钮。
 - 用户点锁定后主面板不可移动且点击穿透，右上角按钮仍保持可见，但只有独立锁按钮可点击解锁。
 - 迷你模式默认横向布局：当前章节在左，当前章节时间放大在右，总时间弱化放在下方；暂停时只改变时间颜色，不显示暂停文字。

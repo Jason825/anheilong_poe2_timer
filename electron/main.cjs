@@ -349,6 +349,27 @@ function loadRenderer(window, kind) {
   }
 }
 
+function showWindowWhenReady(window, shouldShow = () => true) {
+  let shown = false;
+  const show = () => {
+    if (shown || window.isDestroyed() || !shouldShow()) return;
+    shown = true;
+    window.show();
+  };
+
+  window.once("ready-to-show", show);
+  window.webContents.once("did-finish-load", show);
+  window.webContents.once("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+    console.error(`页面加载失败：${errorCode} ${errorDescription} ${validatedURL}`);
+    show();
+  });
+  window.webContents.once("render-process-gone", (_event, details) => {
+    console.error(`渲染进程退出：${details.reason}`);
+    show();
+  });
+  setTimeout(show, 1500);
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: MAIN_WINDOW_DEFAULT_WIDTH,
@@ -377,9 +398,8 @@ function createWindow() {
   mainWindow.setMenuBarVisibility(false);
   setClickThrough(false);
 
-  mainWindow.once("ready-to-show", () => {
-    mainWindow.show();
-  });
+  const timerWindow = mainWindow;
+  showWindowWhenReady(timerWindow, () => mainWindow === timerWindow);
 
   mainWindow.on("close", (event) => {
     if (isQuitting) return;
@@ -440,9 +460,8 @@ function openSettingsWindow() {
 
   settingsWindow.setAlwaysOnTop(true, "screen-saver");
   settingsWindow.setMenuBarVisibility(false);
-  settingsWindow.once("ready-to-show", () => {
-    if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.show();
-  });
+  const currentSettingsWindow = settingsWindow;
+  showWindowWhenReady(currentSettingsWindow, () => settingsWindow === currentSettingsWindow);
   settingsWindow.on("closed", () => {
     settingsWindow = null;
   });

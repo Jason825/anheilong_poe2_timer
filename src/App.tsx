@@ -41,6 +41,7 @@ import type {
 const APP_NAME = "暗黑龙剧情计时器";
 const DEFAULT_NODE_NAMES = ["第一章", "第二章", "第三章", "第四章", "间章", "异界"];
 const DEFAULT_TEMPLATE_ID = "campaign-default-v1";
+const BRAND_LOGO_SRC = `${import.meta.env.BASE_URL}brand/dark-dragon-logo.png`;
 const MAX_TEMPLATE_NODES = 15;
 const DEFAULT_HOTKEYS: HotkeySettings = {
   startPause: "F8",
@@ -1514,7 +1515,7 @@ export default function App() {
         <section className="settings-window-panel">
           <header className="panel-header drag-zone settings-window-header">
             <div className="brand-lockup">
-              <img src="/brand/dark-dragon-logo.png" alt="" />
+              <img src={BRAND_LOGO_SRC} alt="" />
               <div className="eyebrow">设置</div>
             </div>
             <div className="header-actions no-drag">
@@ -1777,7 +1778,7 @@ export default function App() {
         <header className="panel-header drag-zone">
           <div className="header-left">
             <div className="brand-lockup">
-              <img src="/brand/dark-dragon-logo.png" alt="" />
+              <img src={BRAND_LOGO_SRC} alt="" />
               <div className="eyebrow app-name">{APP_NAME}</div>
             </div>
           </div>
